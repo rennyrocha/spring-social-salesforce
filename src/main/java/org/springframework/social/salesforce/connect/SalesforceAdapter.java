@@ -1,9 +1,6 @@
-/*
- * INSERT COPYRIGHT HERE
- */
-
 package org.springframework.social.salesforce.connect;
 
+import org.springframework.social.ApiException;
 import org.springframework.social.connect.ApiAdapter;
 import org.springframework.social.connect.ConnectionValues;
 import org.springframework.social.connect.UserProfile;
@@ -12,42 +9,36 @@ import org.springframework.social.salesforce.api.Salesforce;
 import org.springframework.social.salesforce.api.SalesforceProfile;
 
 /**
+ * Salesforce ApiAdapter implementation.
  *
- * @author sosandstrom
+ * @author Umut Utkan
  */
 public class SalesforceAdapter implements ApiAdapter<Salesforce> {
 
-    public SalesforceAdapter() {
+    public boolean test(Salesforce salesForce) {
+        try {
+            salesForce.chatterOperations().getUserProfile();
+            return true;
+        } catch (ApiException e) {
+            return false;
+        }
     }
 
-    @Override
-    public boolean test(Salesforce a) {
-        throw new UnsupportedOperationException("Not supported yet.");
+    public void setConnectionValues(Salesforce salesforce, ConnectionValues values) {
+        SalesforceProfile profile = salesforce.chatterOperations().getUserProfile();
+        values.setProviderUserId(profile.getId());
+        values.setDisplayName(profile.getFirstName() + " " + profile.getLastName());
     }
 
-    @Override
-    public void setConnectionValues(Salesforce salesforce, ConnectionValues cv) {
-        SalesforceProfile profile = salesforce.basicOperations().getUserProfile();
-        cv.setDisplayName(profile.getName());
-        cv.setProviderUserId(profile.getId());
-    }
-
-    @Override
     public UserProfile fetchUserProfile(Salesforce salesforce) {
-        SalesforceProfile profile = salesforce.basicOperations().getUserProfile();
-        final UserProfileBuilder BUILDER = new UserProfileBuilder();
-        return BUILDER
-                .setUsername(profile.getId())
-                .setEmail(profile.getEmail())
-                .setFirstName(profile.getFirstName())
-                .setLastName(profile.getLastName())
-                .setName(profile.getName())
-                .build();
+        SalesforceProfile profile = salesforce.chatterOperations().getUserProfile();
+        return new UserProfileBuilder().setName(profile.getFirstName()).setFirstName(profile.getFirstName())
+                .setLastName(profile.getLastName()).setEmail(profile.getEmail())
+                .setUsername(profile.getEmail()).build();
     }
 
-    @Override
-    public void updateStatus(Salesforce a, String string) {
-        throw new UnsupportedOperationException("Not supported yet.");
-    }
 
+    public void updateStatus(Salesforce salesforce, String message) {
+        salesforce.chatterOperations().updateStatus(message);
+    }
 }

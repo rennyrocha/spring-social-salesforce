@@ -1,227 +1,152 @@
-/*
- * INSERT COPYRIGHT HERE
- */
-
 package org.springframework.social.salesforce.api.impl;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.type.CollectionType;
+import com.fasterxml.jackson.databind.type.TypeFactory;
+import org.codehaus.jackson.JsonNode;
+
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.converter.json.MappingJacksonHttpMessageConverter;
+import org.springframework.social.UncategorizedApiException;
 import org.springframework.social.oauth2.AbstractOAuth2ApiBinding;
+import org.springframework.social.oauth2.OAuth2Version;
 import org.springframework.social.salesforce.api.*;
-import org.springframework.web.client.ResponseErrorHandler;
+import org.springframework.social.salesforce.api.impl.json.SalesforceModule;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import java.util.List;
 
 /**
- * 
- * @author sosandstrom
+ * Default implementation of Salesforce. This is the main entry point
+ * for all the operations that can be performed on Salesforce.
+ *
+ * @author Umut Utkan
  */
-public class SalesforceTemplate extends AbstractOAuth2ApiBinding implements Salesforce, BasicOperations {
+public class SalesforceTemplate extends AbstractOAuth2ApiBinding implements Salesforce {
 
-    public static final String  VERSION_24       = "v24.0";
-    public static final String  VERSION          = VERSION_24;
+    private static final String INSTANCE_URL = "https://cs17.salesforce.com";
 
-    private static final String INSTANCE_URL_NA1 = "https://na1.salesforce.com";
-    public static final String KIND_ACCOUNT = "Account";
-    public static final String KIND_CONTACT = "Contact";
-    protected final String      FIELDS_CONTACT   = "Id,AccountId,Email,Name,FirstName,LastName,Phone,MobilePhone,MailingStreet,MailingCity,MailingState,MailingPostalCode,MailingCountry";
-    protected final String      FIELDS_ACCOUNT   = "Id,Name,Phone,BillingCity,BillingCountry,BillingPostalCode,BillingState,BillingStreet,ShippingCity,ShippingCountry,ShippingPostalCode,ShippingState,ShippingStreet";
-    protected final String      FIELDS_OPPORTUNITY = "Id,Name,Description,CloseDate,IsClosed";
+    private String instanceUrl;
 
-    static final Logger         LOG              = LoggerFactory.getLogger(SalesforceTemplate.class);
+    private ObjectMapper objectMapper = new ObjectMapper();
 
-    private String              instanceUrl;
+    private ApiOperations apiOperations;
 
-    // Expose the ability to set a custom error handler that will map http error codes to exceptions
-    private static ResponseErrorHandler responseErrorHandler;
+    private ChatterOperations chatterOperations;
 
-    @Override
-    public BasicOperations basicOperations() {
-        return this;
+    private QueryOperations queryOperations;
+
+    private RecentOperations recentOperations;
+
+    private SearchOperations searchOperations;
+
+    private SObjectOperations sObjectsOperations;
+
+
+    public SalesforceTemplate() {
+        initialize();
     }
 
     public SalesforceTemplate(String accessToken) {
-        this(accessToken, INSTANCE_URL_NA1);
-    }
-
-    public SalesforceTemplate(final String accessToken, String instanceUrl) {
         super(accessToken);
+        initialize();
+    }
 
-        final SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory() {
-            @Override
-            protected void prepareConnection(HttpURLConnection connection, String httpMethod) throws IOException {
-                super.prepareConnection(connection, httpMethod);
-                connection.setRequestProperty("Authorization", String.format("OAuth %s", accessToken));
-                LOG.debug("Authorization: OAuth {}", accessToken);
-            }
-        };
-        requestFactory.setConnectTimeout(15000);
-        requestFactory.setReadTimeout(15000);
-        setRequestFactory(requestFactory);
 
-        this.instanceUrl = instanceUrl;
-
-        if (null != responseErrorHandler) {
-            LOG.debug("Configure custom Salesforce error handler");
-            getRestTemplate().setErrorHandler(responseErrorHandler);
-        }
-
+    @Override
+    protected OAuth2Version getOAuth2Version() {
+        return OAuth2Version.DRAFT_10;
     }
 
     @Override
-    public Iterable<SalesforceAccount> getAccounts(int pageSize, String cursorKey) {
-        final String url = String.format("%s/services/data/%s/query/?q={soql}", instanceUrl, VERSION);
-        final String escapedCursorKey = escape(cursorKey);
-        String soql = String.format("SELECT %s FROM Account %s ORDER BY Name LIMIT %d", 
-                FIELDS_ACCOUNT, 
-                null != cursorKey ? String.format("WHERE Name >= '%s'", escapedCursorKey) : "",
-                pageSize);
-        LOG.debug("SOQL: {}", soql);
-        QueryAccountsResponse response = getRestTemplate().getForObject(url, QueryAccountsResponse.class, soql);
-        return response.getRecords();
-    }
-    
-    public static final String escape(String s) {
-        if (null == s) {
-            return null;
-        }
-        StringBuffer sb = new StringBuffer(s);
-        
-        int beginIndex = -2;
-        while (-1 < (beginIndex = sb.indexOf("'", beginIndex+2))) {
-            sb.insert(beginIndex, '\\');
-        }
-        
-        return sb.toString();
+    public ApiOperations apiOperations() {
+        return apiOperations;
     }
 
     @Override
-    public Iterable<SalesforceContact> getContacts(int pageSize, String cursorKey) {
-        final String url = String.format("%s/services/data/%s/query/?q={soql}", instanceUrl, VERSION);
-        final String escapedCursorKey = escape(cursorKey);
-        String soql = String.format("SELECT %s FROM Contact %s ORDER BY Name LIMIT %d", 
-                FIELDS_CONTACT, 
-                null != cursorKey ? String.format("WHERE Name >= '%s'", escapedCursorKey) : "",
-                pageSize);
-        LOG.debug("SOQL: {}", soql);
-        QueryContactsResponse response = getRestTemplate().getForObject(url, QueryContactsResponse.class, soql);
-        return response.getRecords();
+    public ChatterOperations chatterOperations() {
+        return chatterOperations;
     }
 
     @Override
-    public Iterable<SalesforceOpportunity> getOpportunityForAccountId(String accountId, SalesforceOpportunity.Status status, Date afterDate, int pageSize, String cursorKey) {
-
-        final String url = String.format("%s/services/data/%s/query/?q={soql}", instanceUrl, VERSION);
-
-        StringBuilder sb = new StringBuilder();
-
-        // Filter on account id
-        if (null != accountId) {
-            // AccountId must always be provided
-            sb.append(String.format("WHERE AccountId = '%s'", accountId));
-        } else {
-            return null;
-        }
-
-        // Filter on opportunity status if provided
-        if (SalesforceOpportunity.Status.ALL != status) {
-            String opportunityStatus = SalesforceOpportunity.Status.OPEN == status ? "true" : "false";
-            sb.append(" AND ");
-            sb.append(String.format("IsClosed = %s", opportunityStatus));
-        }
-
-        // Filter on date if provided
-        if (null != afterDate) {
-            DateFormat df = new SimpleDateFormat("yyyy-MM-dd");
-            String dateString = df.format(afterDate);
-            if (null != dateString) {
-                sb.append(" AND ");
-                sb.append(String.format("CloseDate >= %s", dateString));
-            }
-        }
-
-        // Filter on cursor key if provided
-        if (null != cursorKey) {
-            final String escapedCursorKey = escape(cursorKey);
-            if (null != escapedCursorKey) {
-                sb.append(" AND ");
-                sb.append(String.format("Name >= '%s'", escapedCursorKey));
-            }
-        }
-
-        String soql = String.format("SELECT %s FROM Opportunity %s ORDER BY Name LIMIT %d",
-                FIELDS_OPPORTUNITY,
-                sb.toString(),
-                pageSize);
-        LOG.debug("SOQL: {}", soql);
-
-        QueryOpportunityResponse response = getRestTemplate().getForObject(url, QueryOpportunityResponse.class, soql);
-        return response.getRecords();
+    public QueryOperations queryOperations() {
+        return queryOperations;
     }
 
     @Override
-    public String getEmail2SalesforceAddress() {
-        SalesforceProfile me = getUserProfile();
-        final String url = String.format("%s/services/data/%s/query/?q={soql}", instanceUrl, VERSION);
-        String soql = String
-                .format("SELECT Id,EmailDomainName FROM EmailServicesAddress WHERE LocalPart='emailtosalesforce' AND AuthorizedSenders LIKE '%s%s%s'",
-                        "%", me.getEmail(), "%");
-        LOG.debug("Email: {}, SOQL: {}", me.getEmail(), soql);
-        QueryEmailServicesAddressResponse response = getRestTemplate().getForObject(url, QueryEmailServicesAddressResponse.class,
-                soql);
-        for(SalesforceEmailServicesAddress sesa : response.getRecords()) {
-            LOG.debug("EmailServicesAddress.EmailDomainName={}", sesa.getEmailDomainName());
-            if (null != sesa.getEmailDomainName()) {
-                return String.format("emailtosalesforce@%s", sesa.getEmailDomainName());
-            }
+    public RecentOperations recentOperations() {
+        return recentOperations;
+    }
+
+    @Override
+    public SearchOperations searchOperations() {
+        return searchOperations;
+    }
+
+    @Override
+    public SObjectOperations sObjectsOperations() {
+        return sObjectsOperations;
+    }
+
+    private void initialize() {
+        apiOperations = new ApiTemplate(this, getRestTemplate());
+        chatterOperations = new ChatterTemplate(this, getRestTemplate());
+        queryOperations = new QueryTemplate(this, getRestTemplate());
+        recentOperations = new RecentTemplate(this, getRestTemplate());
+        searchOperations = new SearchTemplate(this, getRestTemplate());
+        sObjectsOperations = new SObjectsTemplate(this, getRestTemplate());
+    }
+
+
+    @Override
+    protected MappingJackson2HttpMessageConverter getJsonMessageConverter() {
+        MappingJackson2HttpMessageConverter converter = new MappingJackson2HttpMessageConverter();
+
+        objectMapper = converter.getObjectMapper();
+        objectMapper.registerModule(new SalesforceModule());
+        converter.setObjectMapper(objectMapper);
+        return converter;
+    }
+
+    @Override
+    protected void configureRestTemplate(RestTemplate restTemplate) {
+        restTemplate.setErrorHandler(new SalesforceErrorHandler());
+    }
+
+
+    public <T> List<T> readList(JsonNode jsonNode, Class<T> type) {
+        try {
+            CollectionType listType = TypeFactory.defaultInstance().constructCollectionType(List.class, type);
+            return (List<T>) objectMapper.readValue(jsonNode.getValueAsText(), listType);
+        } catch (IOException e) {
+            throw new UncategorizedApiException("salesforce", "Error deserializing data from Salesforce: " + e.getMessage(), e);
         }
-        return null;
+    }
+
+
+    public <T> T readObject(JsonNode jsonNode, Class<T> type) {
+        try {
+            return (T) objectMapper.readValue(jsonNode.getValueAsText(), type);
+        } catch (IOException e) {
+            throw new UncategorizedApiException("salesforce", "Error deserializing data from Salesforce: " + e.getMessage(), e);
+        }
+    }
+
+
+
+    @Override
+    public String getBaseUrl() {
+        return (this.instanceUrl == null ? INSTANCE_URL : this.instanceUrl) + "/services/data";
     }
 
     @Override
-    public SalesforceProfile getUserProfile() {
-        return getUserProfile("me");
-    }
-
-    public SalesforceProfile getUserProfile(String userId) {
-        final String url = String.format("%s/services/data/%s/chatter/users/{id}", instanceUrl, VERSION);
-        LOG.debug("Url {}", url);
-        SalesforceProfile profile = getRestTemplate().getForObject(url, SalesforceProfile.class, userId);
-
-        return profile;
-    }
-
-    @Override
-    public int getAccountCount() {
-        return getCount(KIND_ACCOUNT);
-    }
-
-    @Override
-    public int getContactCount() {
-        return getCount(KIND_CONTACT);
-    }
-    
-    protected int getCount(String kind) {
-        final String url = String.format("%s/services/data/%s/query/?q={soql}", instanceUrl, VERSION);
-        String soql = String.format("SELECT count() FROM %s", kind);
-        QueryCountResponse count = getRestTemplate().getForObject(url, QueryCountResponse.class, soql);
-        LOG.debug("count() {}: {}", kind, count.getTotalSize());
-        return count.getTotalSize();
+    public String getInstanceUrl() {
+        return this.instanceUrl;
     }
 
     public void setInstanceUrl(String instanceUrl) {
         this.instanceUrl = instanceUrl;
     }
-
-    public static void setResponseErrorHandler(ResponseErrorHandler responseErrorHandler) {
-        LOG.debug("Set Salesforce response error handler");
-        SalesforceTemplate.responseErrorHandler = responseErrorHandler;
-    }
-
 
 }
