@@ -16,7 +16,7 @@ import java.util.Map;
  */
 public class BaseSalesforceFactory implements SalesforceFactory {
 
-    private final static String DEFAULT_AUTH_URL = "https://cs17.salesforce.com/services/oauth2/token";
+    private final static String DEFAULT_AUTH_URL = "https://na24.salesforce.com/services/oauth2/token";
 
     private String clientId;
 

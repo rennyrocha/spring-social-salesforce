@@ -26,7 +26,7 @@ public class BaseSalesforceFactoryTest {
         HttpHeaders responseHeaders = new HttpHeaders();
         responseHeaders.setContentType(MediaType.APPLICATION_JSON);
 
-        mockServer.expect(requestTo("https://cs17.salesforce.com/services/oauth2/token"))
+        mockServer.expect(requestTo("https://na24.salesforce.com/services/oauth2/token"))
                 .andExpect(method(POST))
                 .andExpect(body("grant_type=password&client_id=client-id&client_secret=client-secret&username=my-username&password=my-passwordsecurity-token"))
                 .andRespond(withResponse(new ClassPathResource("/client-token.json", getClass()), responseHeaders));

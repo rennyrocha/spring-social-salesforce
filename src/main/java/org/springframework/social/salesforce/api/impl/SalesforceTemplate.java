@@ -25,7 +25,7 @@ import java.util.List;
  */
 public class SalesforceTemplate extends AbstractOAuth2ApiBinding implements Salesforce {
 
-    private static final String INSTANCE_URL = "https://cs17.salesforce.com";
+    private static final String INSTANCE_URL = "https://na24.salesforce.com";
 
     private String instanceUrl;
 
